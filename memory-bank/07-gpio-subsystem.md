@@ -1617,6 +1617,130 @@ Hardware:
     Returns GPIO pin state
 ```
 
+## GPIO Numbering and Base Allocation
+
+### Why GPIO Numbers Start from 512 (Not 0)
+
+Modern kernels use **auto-allocation** for GPIO base numbers, starting from `ARCH_NR_GPIOS` and allocating downward.
+
+```c
+// include/asm-generic/gpio.h
+#ifndef ARCH_NR_GPIOS
+#define ARCH_NR_GPIOS  512  // Default maximum
+#endif
+```
+
+### Automatic Base Assignment
+
+When GPIO chip driver sets `chip->base = -1`, kernel automatically assigns base:
+
+```c
+// drivers/gpio/gpiolib.c
+int gpiochip_add(struct gpio_chip *chip)
+{
+    int base = chip->base;
+    
+    if (base < 0) {  // Auto-allocation requested
+        base = gpiochip_find_base(chip->ngpio);
+        chip->base = base;
+    }
+    ...
+}
+
+static int gpiochip_find_base(int ngpio)
+{
+    struct gpio_chip *chip;
+    int base = ARCH_NR_GPIOS - ngpio;  // Start from 512
+    
+    // Find free space, allocate from high to low
+    list_for_each_entry_reverse(chip, &gpio_chips, list) {
+        if (chip->base + chip->ngpio <= base)
+            break;
+        else
+            base = chip->base - ngpio;  // Try lower range
+    }
+    
+    return base;
+}
+```
+
+### Example: BeagleBone GPIO Numbering
+
+```bash
+$ ls /sys/class/gpio/
+gpiochip512  gpiochip544  gpiochip576  unexport  export
+
+# Each chip has 32 GPIOs:
+# gpiochip512: GPIOs 512-543 (GPIO Bank 0)
+# gpiochip544: GPIOs 544-575 (GPIO Bank 1)
+# gpiochip576: GPIOs 576-607 (GPIO Bank 2)
+```
+
+**Mapping hardware names to Linux numbers:**
+
+| Hardware Name | Linux GPIO Range | Calculation |
+|---------------|------------------|-------------|
+| GPIO0_31      | 512 + 31 = **543** | Bank 0, pin 31 |
+| GPIO1_0       | 544 + 0  = **544** | Bank 1, pin 0 |
+| GPIO1_31      | 544 + 31 = **575** | Bank 1, pin 31 |
+| GPIO2_5       | 576 + 5  = **581** | Bank 2, pin 5 |
+
+### Finding GPIO Base at Runtime
+
+```bash
+# Method 1: sysfs
+cat /sys/class/gpio/gpiochip*/base
+cat /sys/class/gpio/gpiochip*/ngpio
+cat /sys/class/gpio/gpiochip*/label
+
+# Method 2: debugfs (most detailed)
+sudo cat /sys/kernel/debug/gpio
+# Output:
+# gpiochip0: GPIOs 512-543, parent: platform/44e07000.gpio, gpio-0-31:
+# gpiochip1: GPIOs 544-575, parent: platform/4804c000.gpio, gpio-32-63:
+```
+
+### Why Not Hardcode GPIO Numbers
+
+```c
+// ❌ WRONG - Will break on different kernels/platforms
+#define RESET_GPIO 31  // Assumes base=0, but base could be 512!
+ret = gpio_request(RESET_GPIO, "reset");  // Fails with -EPROBE_DEFER
+
+// ✅ CORRECT - Use device tree and descriptors
+struct gpio_desc *reset_gpio;
+reset_gpio = devm_gpiod_get(&pdev->dev, "reset", GPIOD_OUT_HIGH);
+```
+
+### Legacy Number Conversion (If Necessary)
+
+If you MUST use legacy integer API:
+
+```c
+// Calculate Linux GPIO number from hardware bank/pin
+#define GPIO_BANK_BASE(bank)  (512 + (bank * 32))
+#define GPIO_TO_LINUX(bank, pin)  (GPIO_BANK_BASE(bank) + (pin))
+
+// Example: GPIO1_31 on BeagleBone
+int gpio_num = GPIO_TO_LINUX(1, 31);  // = 575
+ret = gpio_request(gpio_num, "my-gpio");
+```
+
+**But better approach - use device tree:**
+
+```dts
+// In device tree
+my_device {
+    compatible = "vendor,my-device";
+    gpios = <&gpio1 31 GPIO_ACTIVE_HIGH>;  // Bank 1, pin 31
+};
+```
+
+```c
+// In driver - no number needed!
+desc = devm_gpiod_get(&pdev->dev, "gpio", GPIOD_OUT_HIGH);
+```
+
 ## Best Practices
 
 ✅ **DO:**
@@ -1626,9 +1750,12 @@ Hardware:
 - Use meaningful names in device tree (`reset-gpios`, `enable-gpios`)
 - Use `_cansleep` variants when calling from contexts that can sleep
 - Protect hardware access with spinlocks in GPIO chip drivers
+- **Never hardcode GPIO numbers** - use device tree or GPIO lookup tables
 
 ❌ **DON'T:**
 - Use legacy integer GPIO API (`gpio_request()`, `gpio_set_value()`)
+- Hardcode GPIO numbers (base can change between kernels)
+- Assume GPIO numbering starts at 0
 - Call non-sleeping GPIO functions from atomic context if chip can sleep
 - Access GPIO hardware registers without locking
 - Forget to handle active-low polarity (framework handles it)

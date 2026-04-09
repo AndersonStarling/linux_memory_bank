@@ -1,5 +1,47 @@
 # Build System & Debugging
 
+## Tracing Source Code with clangd (Kernel 4.4 and older)
+
+Kernel 4.4 (and older) does NOT support `make compile_commands.json` or `gen_compile_commands.py`
+(those were added in Kernel 5.x+). Without this file, `clangd` will show errors everywhere.
+
+### Solution: Use `bear` to intercept the build
+
+**Step 1 – Install bear:**
+```bash
+sudo apt install -y bear
+```
+
+**Step 2 – Clean stale build objects:**
+```bash
+make clean
+```
+
+**Step 3 – Build with bear to capture the compilation database:**
+```bash
+bear -- make -j$(nproc) KCFLAGS="-fno-pic -fno-stack-protector"
+```
+> **Important – Required flags on modern Ubuntu/Debian GCC 13+:**
+>
+> | Flag | Reason |
+> |------|--------|
+> | `-fno-pic` | GCC defaults to PIC mode which conflicts with kernel's `code model kernel` |
+> | `-fno-stack-protector` | GCC 13 enables stack-protector by default; `__stack_chk_fail` comes from glibc which cannot be linked into the kernel |
+
+**Step 4 – Result:**
+After the build completes (15-30 min depending on CPU), `compile_commands.json` will be
+generated at the root of the workspace. The `clangd` extension will automatically pick it
+up, enabling full Go-to-Definition, Find-References, and hover documentation.
+
+### Known Error & Fix
+
+| Error | Root Cause | Fix |
+|-------|-----------|-----|
+| `cc1: error: code model kernel does not support PIC mode` | Ubuntu GCC defaults to PIC; incompatible with kernel build | Add `KCFLAGS="-fno-pic"` to the make command |
+| `undefined reference to '__stack_chk_fail'` | GCC 13 enables stack-protector by default; `__stack_chk_fail` is from glibc which kernel cannot link | Add `-fno-stack-protector` to `KCFLAGS` |
+| `make: *** No rule to make target 'compile_commands.json'` | Kernel < 5.x, Kbuild does not support this target natively | Use `bear -- make` instead |
+| `Command 'bear' not found` | `bear` not installed | `sudo apt install -y bear` |
+
 ## Build Commands
 
 ### Basic Build

@@ -890,6 +890,297 @@ When analyzing a crash:
 
 ---
 
+## Pattern 5: GPIO Request Fails with -EPROBE_DEFER in module_init()
+
+### Symptoms
+```bash
+# Loading module
+$ sudo insmod my_module.ko
+insmod: ERROR: could not insert module my_module.ko: Unknown symbol in module
+
+# dmesg shows
+[  123.456] my_module: gpio_request failed: -517
+[  123.457] my_module: module init failed
+```
+
+### Error Signature
+```
+gpio_request() returns -517 (-EPROBE_DEFER)
+Module init fails
+But: echo 31 > /sys/class/gpio/export WORKS after boot
+```
+
+### Root Cause
+
+**GPIO controller not ready when `module_init()` executes**
+
+Timing issue:
+```
+Boot sequence:
+├─ 1. Kernel core init
+├─ 2. module_init() runs early  ← GPIO controller may not be loaded yet
+│     └─> gpio_request() → -EPROBE_DEFER (517)
+│     └─> module_init returns error → module fails to load
+├─ 3. GPIO controller driver loads
+└─ 4. After boot complete
+      └─> sysfs export works (controller ready now)
+```
+
+### Why This Happens
+
+```c
+// drivers/gpio/gpiolib-legacy.c
+int gpio_request(unsigned gpio, const char *label)
+{
+    struct gpio_desc *desc = gpio_to_desc(gpio);
+    
+    /* GPIO valid but controller not loaded yet */
+    if (!desc && gpio_is_valid(gpio))
+        return -EPROBE_DEFER;  // ← Error 517
+    
+    return gpiod_request(desc, label);
+}
+```
+
+**Problem**: `module_init()` cannot handle `-EPROBE_DEFER`:
+- If probe() returns `-EPROBE_DEFER` → kernel retries later ✓
+- If module_init() returns `-EPROBE_DEFER` → module load fails ✗
+
+### Wrong Code Example
+
+```c
+#include <linux/module.h>
+#include <linux/gpio.h>
+
+static int __init my_init(void)
+{
+    int ret;
+    
+    // GPIO controller might not be ready yet!
+    ret = gpio_request(31, "my-gpio");
+    if (ret) {
+        pr_err("gpio_request failed: %d\n", ret);
+        return ret;  // ❌ Module load fails with -EPROBE_DEFER
+    }
+    
+    gpio_direction_input(31);
+    return 0;
+}
+
+module_init(my_init);
+```
+
+### Diagnostic Steps
+
+**1. Check if GPIO controller is loaded:**
+```bash
+# Method 1: Check sysfs
+ls /sys/class/gpio/
+# If you see gpiochip*, controller is ready
+# If empty or just export/unexport, controller not ready
+
+# Method 2: Check debugfs
+sudo cat /sys/kernel/debug/gpio
+# Should show gpiochip entries
+
+# Method 3: Check modules
+lsmod | grep gpio
+# Look for gpio controller module (gpio_omap, etc.)
+```
+
+**2. Check GPIO numbering:**
+```bash
+# Modern kernels use base != 0
+$ ls /sys/class/gpio/
+gpiochip512  gpiochip544  gpiochip576  # Base starts at 512!
+
+# GPIO "31" doesn't exist - should be 543 or 575
+```
+
+**3. Check timing:**
+```bash
+# Try loading module after boot
+sudo insmod my_module.ko  # May fail
+
+# Wait and retry
+sleep 5
+sudo insmod my_module.ko  # May succeed (controller loaded)
+```
+
+### Solutions
+
+#### Solution 1: Use Platform Driver (RECOMMENDED)
+
+```c
+#include <linux/module.h>
+#include <linux/platform_device.h>
+#include <linux/gpio/consumer.h>
+
+struct my_data {
+    struct gpio_desc *gpio;
+};
+
+static int my_probe(struct platform_device *pdev)
+{
+    struct my_data *priv;
+    
+    priv = devm_kzalloc(&pdev->dev, sizeof(*priv), GFP_KERNEL);
+    if (!priv)
+        return -ENOMEM;
+    
+    /* This handles EPROBE_DEFER automatically */
+    priv->gpio = devm_gpiod_get(&pdev->dev, "reset", GPIOD_IN);
+    if (IS_ERR(priv->gpio)) {
+        if (PTR_ERR(priv->gpio) == -EPROBE_DEFER) {
+            dev_info(&pdev->dev, "GPIO not ready, deferring\n");
+            return -EPROBE_DEFER;  // ✓ Kernel will retry
+        }
+        return PTR_ERR(priv->gpio);
+    }
+    
+    platform_set_drvdata(pdev, priv);
+    dev_info(&pdev->dev, "Probed successfully\n");
+    return 0;
+}
+
+static int my_remove(struct platform_device *pdev)
+{
+    return 0;  // devm_* handles cleanup
+}
+
+static struct platform_driver my_driver = {
+    .probe = my_probe,
+    .remove = my_remove,
+    .driver = {
+        .name = "my-gpio-driver",
+    },
+};
+
+static struct platform_device *my_pdev;
+
+static int __init my_init(void)
+{
+    int ret;
+    
+    ret = platform_driver_register(&my_driver);
+    if (ret)
+        return ret;
+    
+    my_pdev = platform_device_register_simple("my-gpio-driver", 
+                                               -1, NULL, 0);
+    if (IS_ERR(my_pdev)) {
+        platform_driver_unregister(&my_driver);
+        return PTR_ERR(my_pdev);
+    }
+    
+    return 0;
+}
+
+static void __exit my_exit(void)
+{
+    platform_device_unregister(my_pdev);
+    platform_driver_unregister(&my_driver);
+}
+
+module_init(my_init);
+module_exit(my_exit);
+MODULE_LICENSE("GPL");
+```
+
+#### Solution 2: Use late_initcall (Quick workaround)
+
+```c
+#include <linux/module.h>
+#include <linux/gpio.h>
+
+static int gpio_num;
+static int irq_num;
+
+static int __init my_init(void)
+{
+    int ret;
+    
+    ret = gpio_request(575, "my-gpio");  // Note: correct number!
+    if (ret) {
+        pr_err("gpio_request failed: %d\n", ret);
+        return ret;
+    }
+    
+    ret = gpio_direction_input(575);
+    if (ret) {
+        gpio_free(575);
+        return ret;
+    }
+    
+    gpio_num = 575;
+    pr_info("Module loaded\n");
+    return 0;
+}
+
+static void __exit my_exit(void)
+{
+    gpio_free(gpio_num);
+}
+
+// ✓ Load later in boot sequence
+late_initcall(my_init);  // Instead of module_init()
+module_exit(my_exit);
+MODULE_LICENSE("GPL");
+```
+
+#### Solution 3: Fix GPIO Number (If Using Legacy API)
+
+```c
+// Check actual GPIO base on your system
+// ls /sys/class/gpio/
+// gpiochip512 means base=512
+
+// For GPIO1_31 on BeagleBone:
+// Bank 1 base = 544, pin 31
+#define CORRECT_GPIO_NUM  (544 + 31)  // = 575
+
+static int __init my_init(void)
+{
+    int ret = gpio_request(CORRECT_GPIO_NUM, "my-gpio");
+    // Better chance of success with correct number
+    ...
+}
+```
+
+### Verification
+
+```bash
+# After fixing:
+$ sudo insmod my_module.ko
+$ dmesg | tail
+[  456.789] my-gpio-driver: Probing
+[  456.790] my-gpio-driver: GPIO not ready, deferring  # 1st attempt
+[  456.791] my-gpio-driver: Probing                     # 2nd attempt (retry)
+[  456.792] my-gpio-driver: Probed successfully         # Success!
+
+# Check driver binding
+$ ls /sys/bus/platform/drivers/my-gpio-driver/
+my-gpio-driver.0  bind  module  uevent  unbind
+```
+
+### Key Takeaways
+
+| | module_init() | Platform probe() |
+|---|---|---|
+| EPROBE_DEFER handling | ✗ Module fails | ✓ Auto retry |
+| GPIO timing | ✗ May be too early | ✓ Handles dependencies |
+| Cleanup | Manual gpio_free() | ✓ devm_* auto |
+| **Recommended** | Only for simple cases | **Always for GPIO** |
+
+### Related Errors
+
+- **-EINVAL**: GPIO number doesn't exist (wrong base/offset)
+- **-EBUSY**: GPIO already requested by another driver
+- **-ENODEV**: GPIO chip not registered
+- **-517 (-EPROBE_DEFER)**: GPIO controller not ready yet ← This pattern
+
+---
+
 ## Memory Bank Update Log
 
 - **2026-02-05**: Initial creation with Pattern 1-4
@@ -901,3 +1192,9 @@ When analyzing a crash:
   - Added detailed ARM register analysis guide
   - Added stack trace deep dive
   - Added instruction-level debugging
+
+- **2026-03-18**: Added Pattern 5
+  - GPIO request fails with -EPROBE_DEFER in module_init()
+  - GPIO controller timing and auto-base allocation (512+)
+  - Platform driver vs module_init comparison
+  - Solutions: platform driver, late_initcall, GPIO number fixes
