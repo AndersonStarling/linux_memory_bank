@@ -268,6 +268,38 @@ make mrproper              # Full clean including .config
 - Rust 1.78.0+ (if CONFIG_RUST=y)
 - Various tools: flex, bison, pahole, etc.
 
+## Code Navigation & Tracing
+
+> **IMPORTANT**: Always use `clangd` for code tracing. It is AST-based (100% accurate),
+> unlike grep or RAG which are approximate. `clangd` requires `compile_commands.json`.
+
+### Setup (One-time, already done for this workspace)
+
+`compile_commands.json` has been generated at the repository root using `bear`:
+
+```bash
+# Required for Kernel 4.4 on Ubuntu with GCC 13+
+bear -- make -j$(nproc) KCFLAGS="-fno-pic -fno-stack-protector"
+```
+
+See [05-build-debug.md](.github/memory-bank/05-build-debug.md) for full setup details and known errors.
+
+### clangd Capabilities (Use These First, Before grep)
+
+| Action | Shortcut | Description |
+|--------|----------|-------------|
+| Go to Definition | `F12` | Jump to exact function/struct/macro definition |
+| Find All References | `Shift+F12` | Find every call site of a function |
+| Hover | Mouse hover | View function signature and documentation |
+| Go to Declaration | `Ctrl+F12` | Jump to header declaration |
+| Peek Definition | `Alt+F12` | View definition inline without leaving file |
+
+### Supplementary Tools
+
+- **`cscope -d`** (terminal): Interactive cross-reference browser. Run in repo root after `make cscope`.
+- **`ripgrep` / `grep -r`**: For raw pattern/string search when clangd is not enough.
+- **Antigravity AI**: For semantic questions like *"what subsystem handles X?"* or tracing complex multi-file call flows.
+
 ## Common Workflows & Debugging
 
 ### Building Specific Components
