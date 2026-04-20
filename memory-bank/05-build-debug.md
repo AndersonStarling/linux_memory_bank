@@ -1,23 +1,33 @@
 # Build System & Debugging
 
-## Tracing Source Code with clangd (Kernel 4.4 and older)
+### LUẬT BẤT BIẾN: TUYỆT ĐỐI KHÔNG ĐƯỢC SỬA SOURCE CODE TRONG KERNEL.
+Mục tiêu là nghiên cứu và tracing, không phải sửa lỗi kernel. Mọi vấn đề về build (như lỗi register __asmeq khi dùng GCC 9+) phải được giải quyết bằng compiler flags hoặc đổi phiên bản compiler tương thích, KHÔNG ĐƯỢC sửa file header/source của kernel.
+
+### QUY TẮC TRÌNH BÀY: KHÔNG DÙNG ICON KHI UPDATE TÀI LIỆU.
+
+### Tracing Source Code with clangd (Kernel 4.4 and older)
 
 Kernel 4.4 (and older) does NOT support `make compile_commands.json` or `gen_compile_commands.py`
 (those were added in Kernel 5.x+). Without this file, `clangd` will show errors everywhere.
 
-### Solution: Use `bear` to intercept the build
+### Preferred Solution: Kbuild Native Parsing (Approach C)
 
-**Step 1 – Install bear:**
+We have found that `bear` is unreliable in many environments. The most robust way is to build the kernel normally and parse the generated `.*.o.cmd` files.
+
+**Step 1 – Build the kernel:**
 ```bash
-sudo apt install -y bear
+python3 .github/memory-bank/tools/gen-compile-commands.py --board beaglebone-black
 ```
 
-**Step 2 – Clean stale build objects:**
-```bash
-make clean
-```
+**Step 2 – Troubleshooting Build Failures:**
+If the build fails (e.g. `kernel/params.o`), do **NOT** modify the kernel code. Instead:
+- Use `make -k` (keep-going) to generate as many `.cmd` files as possible.
+- Use a confirmed compatible compiler (GCC 9 for Kernel 4.4).
+- The tool will automatically aggregate whatever `.cmd` files were generated even if the build partially failed.
 
-**Step 3 – Build with bear to capture the compilation database:**
+### Alternative Solution: Use `bear` (Approach B)
+
+Only use this if Kbuild parsing is not feasible.
 ```bash
 bear -- make -j$(nproc) KCFLAGS="-fno-pic -fno-stack-protector"
 ```
@@ -38,7 +48,8 @@ up, enabling full Go-to-Definition, Find-References, and hover documentation.
 | Error | Root Cause | Fix |
 |-------|-----------|-----|
 | `cc1: error: code model kernel does not support PIC mode` | Ubuntu GCC defaults to PIC; incompatible with kernel build | Add `KCFLAGS="-fno-pic"` to the make command |
-| `undefined reference to '__stack_chk_fail'` | GCC 13 enables stack-protector by default; `__stack_chk_fail` is from glibc which kernel cannot link | Add `-fno-stack-protector` to `KCFLAGS` |
+| `undefined reference to '__stack_chk_fail'` | GCC 13+ enables stack-protector by default; `__stack_chk_fail` is from glibc which kernel cannot link | Add `-fno-stack-protector` to `KCFLAGS` |
+| `multiple definition of 'yylloc'` | GCC 10+ changed how it handles common symbols in DTC (Device Tree Compiler) scripts; Kernel 4.4 predates this change | Add `-fcommon` to `KCFLAGS`. Example: `--kcflags="-fcommon"` |
 | `make: *** No rule to make target 'compile_commands.json'` | Kernel < 5.x, Kbuild does not support this target natively | Use `bear -- make` instead |
 | `Command 'bear' not found` | `bear` not installed | `sudo apt install -y bear` |
 

@@ -1365,7 +1365,7 @@ sudo insmod drivers/gpio/gpio-mydriver.ko
 | **Blink LED** | Shell loop | Shell loop | ~60 lines |
 | **Setup time** | 2 seconds | 1 second | 5 minutes |
 
-**Winner for driver testing**: **Sysfs** or **Command line tools** 🎯
+**Winner for driver testing**: **Sysfs** or **Command line tools**
 
 ### Decision Tree
 

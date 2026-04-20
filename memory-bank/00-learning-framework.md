@@ -1,6 +1,10 @@
 # Linux Kernel Learning Framework
 
 > **Nguyên tắc cốt lõi**: Khi nghiên cứu bất kỳ subsystem/tính năng nào trong Linux kernel, luôn luôn tìm hiểu **mối liên hệ giữa userspace và kernel** - làm cách nào user có thể tương tác xuống kernel và hardware.
+> 
+> **LUẬT BẤT BIẾN**: **TUYỆT ĐỐI KHÔNG ĐƯỢC SỬA SOURCE CODE TRONG KERNEL**. Mục tiêu là nghiên cứu và tracing, không phải sửa lỗi kernel. Mọi vấn đề về build phải được giải quyết bằng compiler flags hoặc đổi compiler tương thích.
+>
+> **QUY TẮC TRÌNH BÀY**: KHÔNG DÙNG ICON KHI UPDATE TÀI LIỆU.
 
 ---
 
@@ -10,13 +14,13 @@ Mọi kernel subsystem đều tuân theo kiến trúc phân lớp từ userspace
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  👤 USERSPACE (User Application)                    │
+│  USERSPACE (User Application)                       │
 │  - CLI tools, libraries, applications               │
 │  - What user sees and interacts with                │
 └────────────────┬────────────────────────────────────┘
                  │ System calls / ioctl / sysfs / device files
 ┌────────────────▼────────────────────────────────────┐
-│  📁 USERSPACE INTERFACE LAYER                       │
+│  USERSPACE INTERFACE LAYER                          │
 │  - Character device (/dev/*)                        │
 │  - Sysfs attributes (/sys/class/*)                  │
 │  - Procfs (/proc/*)                                 │
@@ -24,23 +28,23 @@ Mọi kernel subsystem đều tuân theo kiến trúc phân lớp từ userspace
 └────────────────┬────────────────────────────────────┘
                  │ Kernel API calls
 ┌────────────────▼────────────────────────────────────┐
-│  🔧 CORE FRAMEWORK (Subsystem Core)                 │
-│  - gpiolib.c, clk-core.c, regulator-core.c, etc.   │
+│  CORE FRAMEWORK (Subsystem Core)                    │
+│  - gpiolib.c, clk-core.c, regulator-core.c, etc.    │
 │  - Descriptor/handle management                     │
 │  - Common API implementation                        │
 │  - Device/resource registration                     │
 └────────────────┬────────────────────────────────────┘
                  │ Driver callbacks (ops)
 ┌────────────────▼────────────────────────────────────┐
-│  🔩 HARDWARE DRIVER LAYER (Chip-specific)           │
-│  - gpio-omap.c, clk-ti.c, etc.                     │
+│  HARDWARE DRIVER LAYER (Chip-specific)              │
+│  - gpio-omap.c, clk-ti.c, etc.                      │
 │  - Implements ops callbacks                         │
 │  - Direct hardware access                           │
 │  - Clock/PM/pinmux management                       │
 └────────────────┬────────────────────────────────────┘
                  │ Register read/write
 ┌────────────────▼────────────────────────────────────┐
-│  🖥️ HARDWARE (Registers, Pins, Peripherals)         │
+│  HARDWARE (Registers, Pins, Peripherals)            │
 │  - Memory-mapped registers                          │
 │  - Physical GPIO pins, clocks, regulators, etc.     │
 └─────────────────────────────────────────────────────┘
@@ -52,7 +56,7 @@ Mọi kernel subsystem đều tuân theo kiến trúc phân lớp từ userspace
 
 Khi nghiên cứu một subsystem mới, trả lời **7 câu hỏi cốt lõi** theo thứ tự:
 
-### 1. **👤 Userspace Interface** - User dùng gì?
+### 1. **Userspace Interface** - User dùng gì?
 
 **Câu hỏi:**
 - User application tương tác với subsystem này như thế nào?
@@ -61,19 +65,19 @@ Khi nghiên cứu một subsystem mới, trả lời **7 câu hỏi cốt lõi**
 - Device files hoặc sysfs paths là gì?
 
 **Ví dụ (GPIO):**
-- ✅ CLI tools: `gpioget`, `gpioset`, `gpiomon`
-- ✅ Library: `libgpiod` (C/Python)
-- ✅ Device files: `/dev/gpiochip0`, `/dev/gpiochip1`
-- ✅ Sysfs (legacy): `/sys/class/gpio/`
+- CLI tools: `gpioget`, `gpioset`, `gpiomon`
+- Library: `libgpiod` (C/Python)
+- Device files: `/dev/gpiochip0`, `/dev/gpiochip1`
+- Sysfs (legacy): `/sys/class/gpio/`
 
 **Ví dụ (Clock):**
-- ✅ CLI tools: `cat /sys/kernel/debug/clk/clk_summary`
-- ✅ Debugfs: `/sys/kernel/debug/clk/`
-- ✅ No direct userspace control (kernel-only API)
+- CLI tools: `cat /sys/kernel/debug/clk/clk_summary`
+- Debugfs: `/sys/kernel/debug/clk/`
+- No direct userspace control (kernel-only API)
 
 ---
 
-### 2. **📁 Kernel Entry Point** - Vào kernel ở đâu?
+### 2. **Kernel Entry Point** - Vào kernel ở đâu?
 
 **Câu hỏi:**
 - System call / ioctl nào được sử dụng?
@@ -81,9 +85,9 @@ Khi nghiên cứu một subsystem mới, trả lời **7 câu hỏi cốt lõi**
 - Sysfs attributes nào được expose?
 
 **Ví dụ (GPIO):**
-- ✅ Character device: `gpio_fileops` trong `gpiolib-cdev.c`
-- ✅ IOCTL: `GPIO_V2_GET_LINE_IOCTL`, `GPIO_V2_LINE_SET_VALUES_IOCTL`
-- ✅ File ops: `open`, `ioctl`, `read` (event notification), `poll`
+- Character device: `gpio_fileops` trong `gpiolib-cdev.c`
+- IOCTL: `GPIO_V2_GET_LINE_IOCTL`, `GPIO_V2_LINE_SET_VALUES_IOCTL`
+- File ops: `open`, `ioctl`, `read` (event notification), `poll`
 
 **Pattern tìm kiếm:**
 ```bash
@@ -98,7 +102,7 @@ grep -r "device_create\|class_create" drivers/gpio/
 
 ---
 
-### 3. **🔧 Core Framework** - Logic trung tâm ở đâu?
+### 3. **Core Framework** - Logic trung tâm ở đâu?
 
 **Câu hỏi:**
 - File nào chứa core implementation?
@@ -107,10 +111,10 @@ grep -r "device_create\|class_create" drivers/gpio/
 - API consumer sử dụng?
 
 **Ví dụ (GPIO):**
-- ✅ Core file: `drivers/gpio/gpiolib.c`
-- ✅ Main structure: `struct gpio_chip`, `struct gpio_desc`
-- ✅ Registration: `gpiochip_add_data()`, `gpiochip_remove()`
-- ✅ Consumer API: `gpiod_get()`, `gpiod_set_value()`, `gpiod_direction_input()`
+- Core file: `drivers/gpio/gpiolib.c`
+- Main structure: `struct gpio_chip`, `struct gpio_desc`
+- Registration: `gpiochip_add_data()`, `gpiochip_remove()`
+- Consumer API: `gpiod_get()`, `gpiod_set_value()`, `gpiod_direction_input()`
 
 **Pattern tìm kiếm:**
 ```bash
@@ -124,7 +128,7 @@ grep -r "EXPORT_SYMBOL.*add\|EXPORT_SYMBOL.*register" drivers/gpio/gpiolib.c
 
 ---
 
-### 4. **🔩 Hardware Driver** - Implement cụ thể như thế nào?
+### 4. **Hardware Driver** - Implement cụ thể như thế nào?
 
 **Câu hỏi:**
 - Structure `ops` callbacks nào cần implement?
@@ -132,10 +136,10 @@ grep -r "EXPORT_SYMBOL.*add\|EXPORT_SYMBOL.*register" drivers/gpio/gpiolib.c
 - Ví dụ driver reference nào tốt?
 
 **Ví dụ (GPIO):**
-- ✅ Structure: `struct gpio_chip { .get, .set, .direction_input, .direction_output, ... }`
-- ✅ Mandatory: `.get`, `.set`, `.direction_input`, `.direction_output`
-- ✅ Optional: `.to_irq`, `.set_config`, `.dbg_show`
-- ✅ Reference driver: `drivers/gpio/gpio-omap.c` (OMAP/AM33xx)
+- Structure: `struct gpio_chip { .get, .set, .direction_input, .direction_output, ... }`
+- Mandatory: `.get`, `.set`, `.direction_input`, `.direction_output`
+- Optional: `.to_irq`, `.set_config`, `.dbg_show`
+- Reference driver: `drivers/gpio/gpio-omap.c` (OMAP/AM33xx)
 
 **Pattern tìm kiếm:**
 ```bash
@@ -148,7 +152,7 @@ ls drivers/gpio/gpio-*.c | head -5
 
 ---
 
-### 5. **📋 Device Tree Binding** - DT integration?
+### 5. **Device Tree Binding** - DT integration?
 
 **Câu hỏi:**
 - Properties bắt buộc là gì?
@@ -183,7 +187,7 @@ ls Documentation/devicetree/bindings/gpio/
 
 ---
 
-### 6. **⚡ Power/Clock/Pinmux Management** - Dependencies?
+### 6. **Power/Clock/Pinmux Management** - Dependencies?
 
 **Câu hỏi:**
 - Subsystem này cần clock nào? (`fck`, `dbclk`, ...)
@@ -192,10 +196,10 @@ ls Documentation/devicetree/bindings/gpio/
 - Regulator dependencies?
 
 **Ví dụ (GPIO AM33xx):**
-- ✅ Clock: `fck` (functional clock) - managed by `ti,sysc` parent
-- ✅ Runtime PM: `pm_runtime_enable()` + `pm_runtime_get_sync()`
-- ✅ Pinmux: Automatic via `gpio-ranges` property
-- ✅ No regulator dependency
+- Clock: `fck` (functional clock) - managed by `ti,sysc` parent
+- Runtime PM: `pm_runtime_enable()` + `pm_runtime_get_sync()`
+- Pinmux: Automatic via `gpio-ranges` property
+- No regulator dependency
 
 **Pattern:**
 ```c
@@ -219,7 +223,7 @@ static int my_probe(struct platform_device *pdev)
 
 ---
 
-### 7. **🐛 Debugging & Verification** - Làm sao verify hoạt động?
+### 7. **Debugging & Verification** - Làm sao verify hoạt động?
 
 **Câu hỏi:**
 - Debugfs interfaces nào có sẵn?
@@ -228,10 +232,10 @@ static int my_probe(struct platform_device *pdev)
 - Common errors và cách fix?
 
 **Ví dụ (GPIO):**
-- ✅ Debugfs: `cat /sys/kernel/debug/gpio`
-- ✅ Sysfs: `/sys/class/gpio/` (legacy)
-- ✅ Device files: `ls /dev/gpiochip*`
-- ✅ Test tools: `gpioinfo gpiochip0`, `gpioget gpiochip0 5`
+- Debugfs: `cat /sys/kernel/debug/gpio`
+- Sysfs: `/sys/class/gpio/` (legacy)
+- Device files: `ls /dev/gpiochip*`
+- Test tools: `gpioinfo gpiochip0`, `gpioget gpiochip0 5`
 
 **Debug commands:**
 ```bash
@@ -257,7 +261,7 @@ echo "file drivers/gpio/* +p" > /sys/kernel/debug/dynamic_debug/control
 
 Khi bắt đầu học một subsystem mới:
 
-### 📝 Phase 1: Userspace Understanding (30 minutes)
+### Phase 1: Userspace Understanding (30 minutes)
 
 ```bash
 # 1. Tìm tools
@@ -282,7 +286,7 @@ pkg-config --cflags --libs libgpiod
 
 ---
 
-### 🔍 Phase 2: Kernel Entry Point Discovery (1 hour)
+### Phase 2: Kernel Entry Point Discovery (1 hour)
 
 ```bash
 # 1. Tìm character device handler
@@ -302,7 +306,7 @@ vim drivers/gpio/gpiolib-cdev.c
 
 ---
 
-### 🛠️ Phase 3: Core Framework Study (2 hours)
+### Phase 3: Core Framework Study (2 hours)
 
 ```bash
 # 1. Tìm core files
@@ -322,7 +326,7 @@ vim include/linux/gpio/driver.h
 
 ---
 
-### ⚙️ Phase 4: Driver Implementation (2-3 hours)
+### Phase 4: Driver Implementation (2-3 hours)
 
 ```bash
 # 1. Đọc reference driver
@@ -343,7 +347,7 @@ vim drivers/gpio/gpio-omap.c
 
 ---
 
-### 🧪 Phase 5: Testing & Debugging (1 hour)
+### Phase 5: Testing & Debugging (1 hour)
 
 ```bash
 # 1. Build & load
@@ -431,19 +435,19 @@ cscope -d -L -0 gpiod_set_value   # Tìm references
 
 Mỗi subsystem memory bank file **PHẢI** bao gồm các sections sau (theo thứ tự):
 
-1. **Architecture Overview** - Diagram phân lớp
-2. **Userspace Interface** - Tools, libraries, device files
-3. **Character Device / Sysfs Layer** - Entry points
-4. **Core Framework** - Main logic, structures, APIs
-5. **Hardware Driver Layer** - Callbacks, implementation pattern
-6. **Device Tree Integration** - Bindings, examples
-7. **Dependencies** - Clock, PM, pinmux requirements
-8. **Debugging & Verification** - Tools, commands, common issues
+1. Architecture Overview - Diagram phân lớp
+2. Userspace Interface - Tools, libraries, device files
+3. Character Device / Sysfs Layer - Entry points
+4. Core Framework - Main logic, structures, APIs
+5. Hardware Driver Layer - Callbacks, implementation pattern
+6. Device Tree Integration - Bindings, examples
+7. Dependencies - Clock, PM, pinmux requirements
+8. Debugging & Verification - Tools, commands, common issues
 
 **Example:**
-- ✅ [07-gpio-subsystem.md](07-gpio-subsystem.md) - Follows this structure
-- ✅ [08-pwm-subsystem.md](08-pwm-subsystem.md) - Follows this structure
-- ✅ All future subsystem docs must follow
+- [07-gpio-subsystem.md](07-gpio-subsystem.md) - Follows this structure
+- [08-pwm-subsystem.md](08-pwm-subsystem.md) - Follows this structure
+- All future subsystem docs must follow
 
 ---
 

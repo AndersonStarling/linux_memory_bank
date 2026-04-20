@@ -27,6 +27,13 @@
 > - [16-irq-subsystem.md](memory-bank/16-irq-subsystem.md) - Interrupt handling, threaded IRQs, deferred work
 >
 > **AI Agent Workflow**: When starting work, review relevant memory bank files for context. These contain patterns, examples, and critical knowledge for Linux kernel development.
+>
+> ### CRITICAL RULES (NEVER BREAK)
+> - ABSOLUTELY DO NOT MODIFY THE KERNEL SOURCE CODE (/arch, /drivers, /kernel, /mm, etc.).
+> - The goal is to study and trace the kernel, not to patch it.
+> - If a build error occurs (e.g., due to compiler version), solve it via build flags (KCFLAGS, HOSTCFLAGS) or by using a compatible compiler, NEVER by editing kernel headers or source files.
+> - Your custom tools and scripts MUST be placed in .github/memory-bank/tools/ or other non-kernel directories.
+> - Do not use icons (emojis) when updating documentation.
 
 ## Memory Bank - Quick Context Reference
 
@@ -270,35 +277,12 @@ make mrproper              # Full clean including .config
 
 ## Code Navigation & Tracing
 
-> **IMPORTANT**: Always use `clangd` for code tracing. It is AST-based (100% accurate),
-> unlike grep or RAG which are approximate. `clangd` requires `compile_commands.json`.
+Note: The automated clangd setup has been cancelled.
 
-### Setup (One-time, already done for this workspace)
-
-`compile_commands.json` has been generated at the repository root using `bear`:
-
-```bash
-# Required for Kernel 4.4 on Ubuntu with GCC 13+
-bear -- make -j$(nproc) KCFLAGS="-fno-pic -fno-stack-protector"
-```
-
-See [05-build-debug.md](.github/memory-bank/05-build-debug.md) for full setup details and known errors.
-
-### clangd Capabilities (Use These First, Before grep)
-
-| Action | Shortcut | Description |
-|--------|----------|-------------|
-| Go to Definition | `F12` | Jump to exact function/struct/macro definition |
-| Find All References | `Shift+F12` | Find every call site of a function |
-| Hover | Mouse hover | View function signature and documentation |
-| Go to Declaration | `Ctrl+F12` | Jump to header declaration |
-| Peek Definition | `Alt+F12` | View definition inline without leaving file |
-
-### Supplementary Tools
-
-- **`cscope -d`** (terminal): Interactive cross-reference browser. Run in repo root after `make cscope`.
-- **`ripgrep` / `grep -r`**: For raw pattern/string search when clangd is not enough.
-- **Antigravity AI**: For semantic questions like *"what subsystem handles X?"* or tracing complex multi-file call flows.
+Standard tools available:
+- ripgrep / grep -r: For pattern/string search.
+- cscope -d: Interactive browser (run in repo root after make cscope).
+- Antigravity AI: For semantic questions and complex call flows.
 
 ## Common Workflows & Debugging
 
